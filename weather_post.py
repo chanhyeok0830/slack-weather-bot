@@ -2,7 +2,7 @@ import requests
 from datetime import datetime, timezone, timedelta
 
 # → 테스트용 하드코딩된 키 (앞뒤 공백 주의!)
-API_KEY = "여기에_직접_붙여넣은_키를_넣으세요"
+API_KEY = "dc808aaafd0c36d73c8652db8190fa69"
 LAT, LON = 37.8813, 127.7299
 
 def fetch_weather_free_direct():
