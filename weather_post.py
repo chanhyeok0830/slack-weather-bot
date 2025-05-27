@@ -9,63 +9,37 @@ def debug_env():
     print(f"SLACK_CHANNEL_ID  loaded: {'YES' if os.getenv('SLACK_CHANNEL_ID') else 'NO'}")
     print("=============================\n")
 
-def fetch_weather_free():
+def fetch_today_weather():
+    # 춘천 좌표
     LAT, LON = 37.8813, 127.7299
+
+    # 오늘 날짜 문자열
     today = datetime.now(timezone(timedelta(hours=9))).date()
 
-    # 1) 현재 날씨 조회
-    url1 = (
+    # Current Weather API 호출
+    url = (
         f"https://api.openweathermap.org/data/2.5/weather"
         f"?lat={LAT}&lon={LON}"
         f"&appid={os.getenv('OPENWEATHER_API_KEY')}"
         f"&units=metric"
     )
-    resp1 = requests.get(url1)
-    resp1.raise_for_status()
-    curr = resp1.json()
-
-    # 2) 5일 예보 조회
-    url2 = (
-        f"https://api.openweathermap.org/data/2.5/forecast"
-        f"?lat={LAT}&lon={LON}"
-        f"&appid={os.getenv('OPENWEATHER_API_KEY')}"
-        f"&units=metric"
-    )
-    resp2 = requests.get(url2)
-    resp2.raise_for_status()
-    forecast = resp2.json()
-
-    # 3) 오늘 날짜(today) 기준으로 list에서 온도·강수 확률 모으기
-    temps = []
-    pops  = []
-    for item in forecast.get("list", []):
-        dt = datetime.fromtimestamp(item["dt"], timezone(timedelta(hours=9)))
-        if dt.date() == today:
-            temps.append(item["main"]["temp"])
-            pops.append(item.get("pop", 0))
-
-    if not temps:
-        raise RuntimeError("오늘 예보 데이터가 없습니다.")
-
-    min_temp = min(temps)
-    max_temp = max(temps)
-    precip   = max(pops) * 100  # %
+    resp = requests.get(url)
+    resp.raise_for_status()
+    data = resp.json()
 
     return {
         "date_str": today,
-        "weather_desc": curr["weather"][0]["description"],
-        "min_temp": min_temp,
-        "max_temp": max_temp,
-        "precip": precip,
-        "humidity": curr["main"]["humidity"],
+        "weather": data["weather"][0]["description"],  # ex: broken clouds
+        "temp": data["main"]["temp"],                  # 현재 온도
+        "feels_like": data["main"]["feels_like"],      # 체감 온도
+        "humidity": data["main"]["humidity"],          # 습도
     }
 
 def post_to_slack(info):
     lines = [
         f"*오늘의 날씨* ({info['date_str']})",
-        f"> 날씨: {info['weather_desc']}",
-        f"> 최고기온: {info['max_temp']:.1f}°C  최저기온: {info['min_temp']:.1f}°C",
-        f"> 강수확률: {info['precip']:.0f}%",
+        f"> 날씨: {info['weather']}",
+        f"> 기온: {info['temp']:.1f}°C  (체감: {info['feels_like']:.1f}°C)",
         f"> 습도: {info['humidity']}%"
     ]
     text = "\n".join(lines)
@@ -85,9 +59,9 @@ def main():
     debug_env()
 
     try:
-        info = fetch_weather_free()
+        info = fetch_today_weather()
     except Exception as e:
-        print(f"[ERROR] fetch_weather_free(): {e}")
+        print(f"[ERROR] fetch_today_weather(): {e}")
         return
 
     try:
