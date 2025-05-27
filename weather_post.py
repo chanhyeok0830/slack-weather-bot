@@ -12,21 +12,44 @@ def debug_env():
 def fetch_today_weather():
     LAT, LON = 37.8813, 127.7299
     today = datetime.now(timezone(timedelta(hours=9))).date()
-    url = (
-        f"https://api.openweathermap.org/data/2.5/weather"
+
+    # 1) Current Weather (한국어)
+    url_cur = (
+        "https://api.openweathermap.org/data/2.5/weather"
         f"?lat={LAT}&lon={LON}"
         f"&appid={os.getenv('OPENWEATHER_API_KEY')}"
-        f"&units=metric"
+        "&units=metric"
+        "&lang=kr"
     )
-    resp = requests.get(url)
-    resp.raise_for_status()
-    data = resp.json()
+    r1 = requests.get(url_cur); r1.raise_for_status()
+    cur = r1.json()
+
+    # 2) 5일 Forecast에서 오늘 날짜에 해당하는 pop(강수확률)만 뽑기
+    url_fc = (
+        "https://api.openweathermap.org/data/2.5/forecast"
+        f"?lat={LAT}&lon={LON}"
+        f"&appid={os.getenv('OPENWEATHER_API_KEY')}"
+        "&units=metric"
+        "&lang=kr"
+    )
+    r2 = requests.get(url_fc); r2.raise_for_status()
+    fc = r2.json()
+
+    pops = []
+    for item in fc.get("list", []):
+        dt = datetime.fromtimestamp(item["dt"], timezone(timedelta(hours=9)))
+        if dt.date() == today:
+            pops.append(item.get("pop", 0))
+
+    pop_max = max(pops)*100 if pops else 0
+
     return {
         "date_str": today,
-        "weather": data["weather"][0]["description"],
-        "temp": data["main"]["temp"],
-        "feels_like": data["main"]["feels_like"],
-        "humidity": data["main"]["humidity"],
+        "weather": cur["weather"][0]["description"],  # 한국어
+        "temp": cur["main"]["temp"],
+        "feels_like": cur["main"]["feels_like"],
+        "humidity": cur["main"]["humidity"],
+        "pop": pop_max,
     }
 
 def post_to_slack(info):
@@ -34,7 +57,8 @@ def post_to_slack(info):
         f"*오늘의 날씨* ({info['date_str']})",
         f"> 날씨: {info['weather']}",
         f"> 기온: {info['temp']:.1f}°C  (체감: {info['feels_like']:.1f}°C)",
-        f"> 습도: {info['humidity']}%"
+        f"> 습도: {info['humidity']}%",
+        f"> 강수확률: {info['pop']:.0f}%"
     ]
     text = "\n".join(lines)
 
@@ -46,18 +70,7 @@ def post_to_slack(info):
         "mrkdwn": True
     }
 
-    print(f"[Slack] POST {slack_url}")
-    print(f"[Slack] headers: {headers}")
-    print(f"[Slack] payload: {payload}")
     resp = requests.post(slack_url, json=payload, headers=headers)
-    print(f"[Slack] HTTP {resp.status_code}")
-    print(f"[Slack] response body: {resp.text}")
-    # Slack이 ok:false 를 반환하면 raise_for_status()는 동작하지 않으므로,
-    # 직접 확인해보고 싶으면 아래 주석을 해제하세요.
-    # data = resp.json()
-    # if not data.get("ok", False):
-    #     raise RuntimeError(f"Slack API error: {data}")
-
     resp.raise_for_status()
 
 def main():
