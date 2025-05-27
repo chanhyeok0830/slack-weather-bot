@@ -10,13 +10,8 @@ def debug_env():
     print("=============================\n")
 
 def fetch_today_weather():
-    # 춘천 좌표
     LAT, LON = 37.8813, 127.7299
-
-    # 오늘 날짜 문자열
     today = datetime.now(timezone(timedelta(hours=9))).date()
-
-    # Current Weather API 호출
     url = (
         f"https://api.openweathermap.org/data/2.5/weather"
         f"?lat={LAT}&lon={LON}"
@@ -26,13 +21,12 @@ def fetch_today_weather():
     resp = requests.get(url)
     resp.raise_for_status()
     data = resp.json()
-
     return {
         "date_str": today,
-        "weather": data["weather"][0]["description"],  # ex: broken clouds
-        "temp": data["main"]["temp"],                  # 현재 온도
-        "feels_like": data["main"]["feels_like"],      # 체감 온도
-        "humidity": data["main"]["humidity"],          # 습도
+        "weather": data["weather"][0]["description"],
+        "temp": data["main"]["temp"],
+        "feels_like": data["main"]["feels_like"],
+        "humidity": data["main"]["humidity"],
     }
 
 def post_to_slack(info):
@@ -52,12 +46,22 @@ def post_to_slack(info):
         "mrkdwn": True
     }
 
+    print(f"[Slack] POST {slack_url}")
+    print(f"[Slack] headers: {headers}")
+    print(f"[Slack] payload: {payload}")
     resp = requests.post(slack_url, json=payload, headers=headers)
+    print(f"[Slack] HTTP {resp.status_code}")
+    print(f"[Slack] response body: {resp.text}")
+    # Slack이 ok:false 를 반환하면 raise_for_status()는 동작하지 않으므로,
+    # 직접 확인해보고 싶으면 아래 주석을 해제하세요.
+    # data = resp.json()
+    # if not data.get("ok", False):
+    #     raise RuntimeError(f"Slack API error: {data}")
+
     resp.raise_for_status()
 
 def main():
     debug_env()
-
     try:
         info = fetch_today_weather()
     except Exception as e:
