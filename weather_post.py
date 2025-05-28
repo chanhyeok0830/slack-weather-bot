@@ -53,45 +53,145 @@ def select_template(desc):
     # 기본 템플릿
     return f"{desc} 날씨입니다."
 
-# ─── 3. 날씨 가져오기 ─────────────────────────────────────────────────────────
+# ─── 3. 하루 전체 날씨 예보 분석 ─────────────────────────────────────────────
+def analyze_daily_weather(forecasts):
+    """하루 전체 예보를 분석해서 대표 날씨를 결정"""
+    rain_count = 0
+    snow_count = 0
+    storm_count = 0
+    cloudy_count = 0
+    clear_count = 0
+    
+    total_pop = 0
+    temp_sum = 0
+    feels_sum = 0
+    humidity_sum = 0
+    count = len(forecasts)
+    
+    for forecast in forecasts:
+        desc = forecast['weather'][0]['description'].lower()
+        
+        # 날씨 유형별 카운트
+        if '비' in desc or 'rain' in desc:
+            rain_count += 1
+        elif '눈' in desc or 'snow' in desc:
+            snow_count += 1
+        elif '천둥' in desc or 'thunder' in desc or 'storm' in desc:
+            storm_count += 1
+        elif '흐림' in desc or '구름' in desc or 'cloud' in desc:
+            cloudy_count += 1
+        else:
+            clear_count += 1
+        
+        # 평균값 계산용
+        total_pop += forecast.get('pop', 0) * 100  # 강수확률은 0-1 범위
+        temp_sum += forecast['main']['temp']
+        feels_sum += forecast['main']['feels_like']
+        humidity_sum += forecast['main']['humidity']
+    
+    # 대표 날씨 결정 (우선순위: 폭풍 > 눈 > 비 > 흐림 > 맑음)
+    if storm_count > 0:
+        main_weather = "폭풍"
+    elif snow_count > 0:
+        main_weather = "눈"
+    elif rain_count > 0:
+        main_weather = "비"
+    elif cloudy_count > clear_count:
+        main_weather = "흐림"
+    else:
+        main_weather = "맑음"
+    
+    return {
+        "main_weather": main_weather,
+        "avg_temp": temp_sum / count,
+        "avg_feels": feels_sum / count,
+        "avg_humidity": humidity_sum / count,
+        "max_pop": total_pop / count,  # 평균 강수확률
+        "rain_periods": rain_count,
+        "total_periods": count
+    }
+
 def fetch_weather():
     LAT, LON = 37.8813, 127.7299
     today = datetime.now(timezone(timedelta(hours=9))).date()
-
-    # 현재 날씨
+    
+    # 5일 예보 API (3시간 간격)
     url = (
+        "https://api.openweathermap.org/data/2.5/forecast"
+        f"?lat={LAT}&lon={LON}"
+        f"&appid={os.getenv('OPENWEATHER_API_KEY')}"
+        "&units=metric"
+        "&lang=kr"
+    )
+    
+    r = requests.get(url)
+    r.raise_for_status()
+    data = r.json()
+    
+    # 오늘 날짜의 예보만 필터링
+    today_forecasts = []
+    today_str = today.strftime("%Y-%m-%d")
+    
+    for item in data['list']:
+        forecast_time = datetime.fromtimestamp(item['dt'], timezone(timedelta(hours=9)))
+        if forecast_time.date().strftime("%Y-%m-%d") == today_str:
+            today_forecasts.append(item)
+    
+    # 현재 날씨도 가져오기 (현재 기온 정확도를 위해)
+    current_url = (
         "https://api.openweathermap.org/data/2.5/weather"
         f"?lat={LAT}&lon={LON}"
         f"&appid={os.getenv('OPENWEATHER_API_KEY')}"
         "&units=metric"
         "&lang=kr"
     )
-    r = requests.get(url); r.raise_for_status()
-    data = r.json()
-
-    return {
-        "date": today.strftime("%m월 %d일"),
-        "desc": data["weather"][0]["description"],
-        "temp": data["main"]["temp"],
-        "feels": data["main"]["feels_like"],
-        "humidity": data["main"]["humidity"],
-        # POP는 forecast에서 뽑아오거나 대체로 0으로 설정
-        "pop": 0,
-    }
+    current_r = requests.get(current_url)
+    current_r.raise_for_status()
+    current_data = current_r.json()
+    
+    # 하루 전체 날씨 분석
+    if today_forecasts:
+        analysis = analyze_daily_weather(today_forecasts)
+        return {
+            "date": today.strftime("%m월 %d일"),
+            "desc": analysis["main_weather"],
+            "temp": current_data["main"]["temp"],  # 현재 기온
+            "feels": current_data["main"]["feels_like"],  # 현재 체감기온
+            "humidity": analysis["avg_humidity"],
+            "pop": analysis["max_pop"],
+            "rain_info": f"{analysis['rain_periods']}/{analysis['total_periods']} 시간대" if analysis['rain_periods'] > 0 else None
+        }
+    else:
+        # 예보 데이터가 없으면 현재 날씨 사용
+        return {
+            "date": today.strftime("%m월 %d일"),
+            "desc": current_data["weather"][0]["description"],
+            "temp": current_data["main"]["temp"],
+            "feels": current_data["main"]["feels_like"],
+            "humidity": current_data["main"]["humidity"],
+            "pop": 0,
+            "rain_info": None
+        }
 
 # ─── 4. 슬랙 전송 ────────────────────────────────────────────────────────────
 def post_to_slack(info):
-    emoji     = select_emoji(info["desc"])
-    sentence  = select_template(info["desc"])
-    # 메시지 문장 구성: 이모지는 문장 안·끝·별도 줄로 자유 배치
+    emoji = select_emoji(info["desc"])
+    sentence = select_template(info["desc"])
+    
+    # 메시지 구성
     text_lines = [
-        f"{emoji}",  # 별도 줄에 이모티콘만
+        f"{emoji}",
         f"*오늘의 날씨* ({info['date']})",
         f"> {sentence}",
         f"> 기온: {info['temp']:.1f}°C  (체감: {info['feels']:.1f}°C)",
-        f"> 습도: {info['humidity']}%",
+        f"> 습도: {info['humidity']:.0f}%",
         f"> 강수확률: {info['pop']:.0f}%"
     ]
+    
+    # 비 정보가 있으면 추가
+    if info.get('rain_info'):
+        text_lines.append(f"> 🌧️ 비 예상 시간대: {info['rain_info']}")
+    
     text = "\n".join(text_lines)
 
     resp = requests.post(
@@ -101,8 +201,7 @@ def post_to_slack(info):
             "channel": os.getenv("SLACK_CHANNEL_ID"),
             "text": text,
             "mrkdwn": True,
-            "icon_emoji": emoji,        # 프로필 옆 이모티콘
-            # "username": "오늘의 날씨 봇"
+            "icon_emoji": emoji,
         }
     )
     resp.raise_for_status()
