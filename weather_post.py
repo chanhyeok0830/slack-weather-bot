@@ -28,7 +28,7 @@ TEMPLATES = {
         "구름이 많아 해가 잘 보이지 않을 수 있어요.",
     ],
     "비": [
-        "비가 내릴 수 있으니 우산 챙기세요. ☔",
+        "약한 비가 내릴 수 있으니 우산 챙기세요. ☔",
         "비 소식이 있어요. 외출하실 때 우산 잊지 마세요!",
     ],
     "눈": [
@@ -62,6 +62,7 @@ def analyze_daily_weather(forecasts):
     cloudy_count = 0
     clear_count = 0
     
+    rain_times = []  # 비 오는 시간대 저장
     total_pop = 0
     temp_sum = 0
     feels_sum = 0
@@ -70,10 +71,13 @@ def analyze_daily_weather(forecasts):
     
     for forecast in forecasts:
         desc = forecast['weather'][0]['description'].lower()
+        forecast_time = datetime.fromtimestamp(forecast['dt'], timezone(timedelta(hours=9)))
+        hour = forecast_time.hour
         
         # 날씨 유형별 카운트
         if '비' in desc or 'rain' in desc:
             rain_count += 1
+            rain_times.append(hour)
         elif '눈' in desc or 'snow' in desc:
             snow_count += 1
         elif '천둥' in desc or 'thunder' in desc or 'storm' in desc:
@@ -101,14 +105,28 @@ def analyze_daily_weather(forecasts):
     else:
         main_weather = "맑음"
     
+    # 비 오는 시간대를 사용자 친화적으로 변환
+    rain_info = None
+    if rain_times:
+        if len(rain_times) == 1:
+            rain_info = f"{rain_times[0]}시경"
+        elif len(rain_times) == 2:
+            rain_info = f"{rain_times[0]}시, {rain_times[1]}시경"
+        else:
+            # 연속된 시간대인지 확인
+            rain_times.sort()
+            if max(rain_times) - min(rain_times) <= 6:  # 6시간 이내 범위
+                rain_info = f"{min(rain_times)}시~{max(rain_times)}시경"
+            else:
+                rain_info = f"하루 중 여러 시간대 ({len(rain_times)}회)"
+    
     return {
         "main_weather": main_weather,
         "avg_temp": temp_sum / count,
         "avg_feels": feels_sum / count,
         "avg_humidity": humidity_sum / count,
         "max_pop": total_pop / count,  # 평균 강수확률
-        "rain_periods": rain_count,
-        "total_periods": count
+        "rain_info": rain_info
     }
 
 def fetch_weather():
@@ -159,7 +177,7 @@ def fetch_weather():
             "feels": current_data["main"]["feels_like"],  # 현재 체감기온
             "humidity": analysis["avg_humidity"],
             "pop": analysis["max_pop"],
-            "rain_info": f"{analysis['rain_periods']}/{analysis['total_periods']} 시간대" if analysis['rain_periods'] > 0 else None
+            "rain_info": analysis["rain_info"]
         }
     else:
         # 예보 데이터가 없으면 현재 날씨 사용
